@@ -116,9 +116,9 @@ if [ "$TLS" -eq 1 ]; then
   say "They set these once (e.g. in ~/.bashrc), pointing at their copy of that file:"
   say "  export FSCHAT_HOST=$HOST_IP FSCHAT_AUTH_PORT=$HTTPS_PORT FSCHAT_WS_PORT=$WS_PORT FSCHAT_TLS=true"
   say "  export FSCHAT_TRUSTSTORE=<path>/dev-truststore.p12 FSCHAT_TRUSTSTORE_PASS=$KEYSTORE_PASS"
-  say "and then connect without repeating any flags:"
+  say "and then register once (the daemon installs itself as an always-on service):"
   say "  fschat-daemon register <name>"
-  say "  fschat-daemon start &"
+  say "  fschat-daemon create <peer>   # then edit the .chat file it prints in vim"
   say "  (connect via $HOST_IP — NOT 'localhost', which may resolve to IPv6 and fail)"
 else
   say "Beta testers connect their daemon to this host:"

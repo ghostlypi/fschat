@@ -5,6 +5,7 @@ import dev.fschat.daemon.config.DaemonConfig;
 import dev.fschat.daemon.local.LocalControlClient;
 import dev.fschat.daemon.remote.AuthClient;
 import dev.fschat.daemon.remote.ClientTls;
+import dev.fschat.daemon.service.ServiceInstaller;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
@@ -16,6 +17,7 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.URI;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -39,7 +41,7 @@ import java.util.concurrent.CountDownLatch;
 @Command(name = "fschat-daemon", mixinStandardHelpOptions = true,
         description = "fschat daemon and CLI.",
         subcommands = {Main.Register.class, Main.Login.class, Main.Start.class,
-                Main.Create.class, Main.Dm.class, Main.GroupNew.class,
+                Main.Service.class, Main.Create.class, Main.Dm.class, Main.GroupNew.class,
                 Main.GroupAdd.class, Main.GroupRemove.class})
 public final class Main implements Runnable {
 
@@ -96,6 +98,25 @@ public final class Main implements Runnable {
                     ? ClientTls.trusting(ts, truststorePass.toCharArray())
                     : null;
         }
+
+        /** Explicit flags reproducing these settings, so a baked service doesn't rely on env. */
+        List<String> startArgs() {
+            List<String> a = new ArrayList<>(List.of(
+                    "--host", host,
+                    "--auth-port", String.valueOf(authPort),
+                    "--ws-port", String.valueOf(wsPort)));
+            if (tls()) {
+                a.add("--tls");
+                Path ts = truststore();
+                if (ts != null) {
+                    a.add("--truststore");
+                    a.add(ts.toAbsolutePath().toString());
+                    a.add("--truststore-pass");
+                    a.add(truststorePass);
+                }
+            }
+            return a;
+        }
     }
 
     /** Local filesystem layout options. */
@@ -108,6 +129,13 @@ public final class Main implements Runnable {
         DaemonConfig config() {
             return new DaemonConfig(configDir, root);
         }
+
+        /** Explicit flags reproducing these paths, for a baked service command. */
+        List<String> startArgs() {
+            return List.of(
+                    "--config-dir", configDir.toAbsolutePath().toString(),
+                    "--root", root.toAbsolutePath().toString());
+        }
     }
 
     @Command(name = "register", description = "Create an account and save its token.")
@@ -116,6 +144,8 @@ public final class Main implements Runnable {
         @Mixin PathOpts paths;
         @Parameters(index = "0", description = "Username.") String username;
         @Option(names = "--password", description = "Password (prompted if omitted).") String password;
+        @Option(names = "--no-service", description = "Don't install the always-on systemd user service.")
+        boolean noService;
 
         @Override
         public Integer call() {
@@ -130,6 +160,7 @@ public final class Main implements Runnable {
             paths.config().writeToken(info.token());
             System.out.println("registered as " + info.handle() + "; token saved to " + paths.config().tokenFile());
             System.out.println("others can reach you with:  " + info.handle());
+            setUpService(server, paths, noService);
             return 0;
         }
     }
@@ -140,6 +171,8 @@ public final class Main implements Runnable {
         @Mixin PathOpts paths;
         @Parameters(index = "0", description = "Username, or name:hexid if the name is shared.") String username;
         @Option(names = "--password", description = "Password (prompted if omitted).") String password;
+        @Option(names = "--no-service", description = "Don't install the always-on systemd user service.")
+        boolean noService;
 
         @Override
         public Integer call() {
@@ -153,6 +186,7 @@ public final class Main implements Runnable {
             }
             paths.config().writeToken(info.token());
             System.out.println("logged in as " + info.handle());
+            setUpService(server, paths, noService);
             return 0;
         }
     }
@@ -174,6 +208,41 @@ public final class Main implements Runnable {
                 latch.await();
             }
             return 0;
+        }
+    }
+
+    @Command(name = "service", description = "Manage the always-on systemd user service (install|uninstall|status).")
+    static final class Service implements Callable<Integer> {
+        @Mixin ServerOpts server;
+        @Mixin PathOpts paths;
+        @Parameters(index = "0", description = "install | uninstall | status") String action;
+
+        @Override
+        public Integer call() {
+            switch (action == null ? "" : action.toLowerCase()) {
+                case "install" -> {
+                    if (!ServiceInstaller.available()) {
+                        System.err.println("error: systemd --user is not available on this host");
+                        return 1;
+                    }
+                    System.out.println(ServiceInstaller.install(serviceExec(server, paths)));
+                    return 0;
+                }
+                case "uninstall" -> {
+                    System.out.println(ServiceInstaller.uninstall());
+                    return 0;
+                }
+                case "status" -> {
+                    System.out.println(ServiceInstaller.installed()
+                            ? "installed — manage with: systemctl --user status " + ServiceInstaller.UNIT
+                            : "not installed");
+                    return 0;
+                }
+                default -> {
+                    System.err.println("error: action must be one of: install, uninstall, status");
+                    return 1;
+                }
+            }
         }
     }
 
@@ -277,6 +346,29 @@ public final class Main implements Runnable {
     @Override
     public void run() {
         CommandLine.usage(this, System.out);
+    }
+
+    /** ExecStart command for the systemd unit: the launcher + "start" + explicit settings. */
+    private static List<String> serviceExec(ServerOpts server, PathOpts paths) {
+        List<String> exec = new ArrayList<>();
+        exec.add(ServiceInstaller.launcher().toString());
+        exec.add("start");
+        exec.addAll(server.startArgs());
+        exec.addAll(paths.startArgs());
+        return exec;
+    }
+
+    /** After register/login, install (or refresh) the always-on daemon service. */
+    private static void setUpService(ServerOpts server, PathOpts paths, boolean noService) {
+        if (noService) {
+            System.out.println("(--no-service) run the daemon yourself with:  fschat-daemon start &");
+            return;
+        }
+        if (!ServiceInstaller.available()) {
+            System.out.println("note: no systemd --user here; start the daemon with:  fschat-daemon start &");
+            return;
+        }
+        System.out.println(ServiceInstaller.install(serviceExec(server, paths)));
     }
 
     private static int report(JsonNode reply, String successMessage) {
