@@ -60,7 +60,7 @@ build_keystore() {
     -name fschat -passout "pass:$KEYSTORE_PASS" \
     -out "$CERT_DIR/le-keystore.p12"
   chown "$RUN_USER:$RUN_USER" "$CERT_DIR/le-keystore.p12"
-  chmod 640 "$CERT_DIR/le-keystore.p12"
+  chmod 644 "$CERT_DIR/le-keystore.p12"  # world-readable so the rootless container's user can read it (key is password-protected)
 }
 build_keystore
 
