@@ -231,23 +231,24 @@ public final class Main implements Runnable {
 
         @Override
         public Integer call() {
+            String unit = ServiceInstaller.unitFor(paths.configDir);
             switch (action == null ? "" : action.toLowerCase()) {
                 case "install" -> {
                     if (!ServiceInstaller.available()) {
                         System.err.println("error: systemd --user is not available on this host");
                         return 1;
                     }
-                    System.out.println(ServiceInstaller.install(serviceExec(server, paths)));
+                    System.out.println(ServiceInstaller.install(unit, serviceExec(server, paths)));
                     return 0;
                 }
                 case "uninstall" -> {
-                    System.out.println(ServiceInstaller.uninstall());
+                    System.out.println(ServiceInstaller.uninstall(unit));
                     return 0;
                 }
                 case "status" -> {
-                    System.out.println(ServiceInstaller.installed()
-                            ? "installed — manage with: systemctl --user status " + ServiceInstaller.UNIT
-                            : "not installed");
+                    System.out.println(ServiceInstaller.installed(unit)
+                            ? unit + " installed — manage with: systemctl --user status " + unit
+                            : unit + " not installed");
                     return 0;
                 }
                 default -> {
@@ -380,7 +381,10 @@ public final class Main implements Runnable {
             System.out.println("note: no systemd --user here; start the daemon with:  fschat-daemon start &");
             return;
         }
-        System.out.println(ServiceInstaller.install(serviceExec(server, paths)));
+        // A non-default --config-dir gets its own unit, so multiple accounts can each
+        // run their own always-on daemon on one machine.
+        System.out.println(ServiceInstaller.install(
+                ServiceInstaller.unitFor(paths.configDir), serviceExec(server, paths)));
     }
 
     private static int report(JsonNode reply, String successMessage) {

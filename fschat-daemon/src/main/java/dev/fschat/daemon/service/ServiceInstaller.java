@@ -29,24 +29,27 @@ public final class ServiceInstaller {
         return os.contains("linux") && which("systemctl") != null;
     }
 
-    /** Is the unit file already present? */
-    public static boolean installed() {
-        return Files.exists(unitPath());
+    /** Is the named unit file already present? */
+    public static boolean installed(String unit) {
+        return Files.exists(unitPath(unit));
     }
 
     /**
-     * Write the unit, reload, enable lingering, and {@code enable --now}. Returns a
-     * human-readable status line; never throws.
+     * Write the named unit, reload, enable lingering, and {@code enable --now}.
+     * Returns a human-readable status line; never throws. A per-account unit name
+     * (e.g. {@code fschat-antighostlypi.service}) lets several accounts each run
+     * their own always-on daemon on one machine.
      *
+     * @param unit      the systemd user unit name (e.g. {@code fschat.service})
      * @param execStart the full ExecStart command (launcher + "start" + flags)
      */
-    public static String install(List<String> execStart) {
+    public static String install(String unit, List<String> execStart) {
         try {
-            Path unit = unitPath();
-            Files.createDirectories(unit.getParent());
-            Files.writeString(unit, unitContent(execStart));
+            Path unitFile = unitPath(unit);
+            Files.createDirectories(unitFile.getParent());
+            Files.writeString(unitFile, unitContent(execStart));
             try {
-                Files.setPosixFilePermissions(unit, PosixFilePermissions.fromString("rw-------"));
+                Files.setPosixFilePermissions(unitFile, PosixFilePermissions.fromString("rw-------"));
             } catch (UnsupportedOperationException | IOException ignore) {
                 // non-POSIX fs; the contents aren't very sensitive
             }
@@ -54,13 +57,13 @@ public final class ServiceInstaller {
             // Linger lets the service run at boot without an interactive login. Best-effort:
             // on locked-down hosts this needs `sudo loginctl enable-linger <user>` once.
             run("loginctl", "enable-linger", System.getProperty("user.name"));
-            int rc = run("systemctl", "--user", "enable", "--now", UNIT);
+            int rc = run("systemctl", "--user", "enable", "--now", unit);
             if (rc == 0) {
-                return "daemon installed as a systemd user service (auto-starts on login/boot, "
-                        + "restarts on crash). Manage with: systemctl --user status|restart|stop " + UNIT;
+                return "daemon installed as systemd user service '" + unit + "' (auto-starts on "
+                        + "login/boot, restarts on crash). Manage: systemctl --user status|restart|stop " + unit;
             }
-            return "wrote " + unit + ", but 'systemctl --user enable --now' returned " + rc
-                    + " — enable it once with:  systemctl --user enable --now " + UNIT;
+            return "wrote " + unitFile + ", but 'systemctl --user enable --now' returned " + rc
+                    + " — enable it once with:  systemctl --user enable --now " + unit;
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
@@ -70,19 +73,35 @@ public final class ServiceInstaller {
         }
     }
 
-    /** Disable + remove the unit. Returns a status line; never throws. */
-    public static String uninstall() {
+    /** Disable + remove the named unit. Returns a status line; never throws. */
+    public static String uninstall(String unit) {
         try {
-            run("systemctl", "--user", "disable", "--now", UNIT);
-            Files.deleteIfExists(unitPath());
+            run("systemctl", "--user", "disable", "--now", unit);
+            Files.deleteIfExists(unitPath(unit));
             run("systemctl", "--user", "daemon-reload");
-            return "removed systemd user service '" + UNIT + "'";
+            return "removed systemd user service '" + unit + "'";
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
             return "could not remove the service: " + e.getMessage();
         }
+    }
+
+    /**
+     * The systemd unit name for a given config-dir. The default config-dir uses
+     * {@code fschat.service}; any other dir gets {@code fschat-<tag>.service} (tag
+     * derived from the dir name), so each account has its own always-on service.
+     */
+    public static String unitFor(Path configDir) {
+        Path def = Path.of(System.getProperty("user.home"), ".config", "fschat").toAbsolutePath().normalize();
+        Path cfg = configDir.toAbsolutePath().normalize();
+        if (cfg.equals(def)) {
+            return UNIT;
+        }
+        String tag = cfg.getFileName().toString().replaceAll("[^A-Za-z0-9_.-]", "-");
+        // Avoid "fschat-fschat-..." when the dir is already named like fschat-<x>.
+        return (tag.startsWith("fschat") ? tag : "fschat-" + tag) + ".service";
     }
 
     /** The unit file body for the given ExecStart command. Package-visible for testing. */
@@ -133,8 +152,8 @@ public final class ServiceInstaller {
         return onPath != null ? onPath : Path.of("fschat-daemon");
     }
 
-    private static Path unitPath() {
-        return Path.of(System.getProperty("user.home"), ".config", "systemd", "user", UNIT);
+    private static Path unitPath(String unit) {
+        return Path.of(System.getProperty("user.home"), ".config", "systemd", "user", unit);
     }
 
     private static Path which(String name) {

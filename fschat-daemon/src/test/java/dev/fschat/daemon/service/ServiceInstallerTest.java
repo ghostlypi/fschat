@@ -33,6 +33,18 @@ class ServiceInstallerTest {
     }
 
     @Test
+    void unitNameIsPerConfigDir() {
+        String home = System.getProperty("user.home");
+        // Default config-dir keeps the plain unit name.
+        assertEquals("fschat.service", ServiceInstaller.unitFor(java.nio.file.Path.of(home, ".config", "fschat")));
+        // A custom dir gets its own unit (no "fschat-fschat-" doubling).
+        assertEquals("fschat-antighostlypi.service",
+                ServiceInstaller.unitFor(java.nio.file.Path.of(home, ".config", "fschat-antighostlypi")));
+        assertEquals("fschat-foo.service",
+                ServiceInstaller.unitFor(java.nio.file.Path.of(home, ".config", "foo")));
+    }
+
+    @Test
     void availableDoesNotThrow() {
         // Just exercises the OS/systemctl probe; value depends on the host.
         boolean ok = ServiceInstaller.available();
