@@ -19,8 +19,6 @@ say() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HTTPS_PORT="${FSCHAT_HTTPS_PORT:-8443}"
-WS_PORT="${FSCHAT_WS_PORT:-8444}"
 DEPLOY_DIR="${FSCHAT_DEPLOY_DIR:-$HOME/.fschat-deploy}"
 KEYSTORE_PASS="${FSCHAT_KEYSTORE_PASS:-devpass}"
 IMAGE="fschat-server:latest"
@@ -49,8 +47,26 @@ if ! $RT image inspect "$IMAGE" >/dev/null 2>&1; then
   $RT build -t "$IMAGE" "$REPO_ROOT"
 fi
 
-# 2. Stable JWT secret (generated once, reused on redeploy so tokens keep verifying)
 mkdir -p "$DEPLOY_DIR"
+
+# Host ports: an explicit FSCHAT_HTTPS_PORT/FSCHAT_WS_PORT wins AND is remembered;
+# otherwise reuse the previously saved choice; otherwise fall back to the defaults.
+# This lets you move off 8443/8444 once and have every later redeploy keep the change.
+PORTS_FILE="$DEPLOY_DIR/ports"
+if [ -n "${FSCHAT_HTTPS_PORT:-}" ] || [ -n "${FSCHAT_WS_PORT:-}" ]; then
+  HTTPS_PORT="${FSCHAT_HTTPS_PORT:-8443}"
+  WS_PORT="${FSCHAT_WS_PORT:-8444}"
+  printf 'HTTPS_PORT=%s\nWS_PORT=%s\n' "$HTTPS_PORT" "$WS_PORT" > "$PORTS_FILE"
+elif [ -s "$PORTS_FILE" ]; then
+  # shellcheck disable=SC1090
+  . "$PORTS_FILE"
+else
+  HTTPS_PORT=8443
+  WS_PORT=8444
+fi
+say "Host ports: $HTTPS_PORT (auth/https) and $WS_PORT (stream/wss)"
+
+# 2. Stable JWT secret (generated once, reused on redeploy so tokens keep verifying)
 SECRET_FILE="$DEPLOY_DIR/jwt-secret"
 if [ ! -s "$SECRET_FILE" ]; then
   head -c 32 /dev/urandom | base64 | tr -d '\n' > "$SECRET_FILE"
