@@ -1,0 +1,26 @@
+# Run the fschat server in a container with a persistent volume.
+#
+#   FSCHAT_JWT_SECRET=$(head -c 32 /dev/urandom | base64) docker compose up --build
+#
+# or put FSCHAT_JWT_SECRET in a .env file next to this one. Works with
+# `podman compose` / `podman-compose` too.
+
+services:
+  fschat-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fschat-server:latest
+    container_name: fschat-server
+    environment:
+      # Required: a stable 32+ byte secret so issued tokens survive restarts.
+      FSCHAT_JWT_SECRET: ${FSCHAT_JWT_SECRET:?set FSCHAT_JWT_SECRET (env or .env file)}
+    ports:
+      - "8443:8443"   # HTTPS auth (register/login)
+      - "8444:8444"   # WSS event stream
+    volumes:
+      - fschat-data:/data
+    restart: unless-stopped
+
+volumes:
+  fschat-data:

@@ -1,0 +1,19 @@
+# Keep the build context small and avoid copying host build outputs into the image.
+.git
+.gradle
+build
+**/build
+.fschat-test
+certs
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.p12
+*.jks
+/run
+.idea
+*.iml
+Dockerfile
+.dockerignore
+docker-compose.yml

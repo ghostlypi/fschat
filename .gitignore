@@ -1,0 +1,25 @@
+# Gradle
+.gradle/
+build/
+**/build/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# fschat runtime artifacts
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.p12
+*.jks
+fschat-data/
+/run/
+
+# OS
+.DS_Store
+
+# Test environment (deploy-test-env.sh)
+.fschat-test/

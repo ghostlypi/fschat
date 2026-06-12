@@ -1,0 +1,57 @@
+*fschat.txt*  Filesystem-native chat in Vim
+
+==============================================================================
+INTRODUCTION                                                       *fschat*
+
+fschat turns each conversation into a file. Opening a |.chat| file connects to
+the local fschat daemon, loads the live transcript into a read-only pane, and
+opens a small compose pane below it. New and edited messages from the server
+stream into the transcript in real time.
+
+Requires Vim 8.0+ with |+channel|.
+
+==============================================================================
+SETUP                                                        *fschat-setup*
+
+1. Start the server and your daemon (see the project README), then:
+
+       fschat-daemon dm bob
+
+   The daemon creates ~/fschat/dms/bob.chat.
+
+2. Make the plugin visible to Vim, e.g. add the vim/ directory to your
+   'runtimepath', or symlink it under ~/.vim/pack/.../start/fschat.
+
+3. Open the file:
+
+       vim ~/fschat/dms/bob.chat
+
+The daemon is auto-discovered: it drops a |.fschat-port| marker in its chat
+root, and the plugin walks up from the file you open to find it. So opening a
+file selects the account by its location — two accounts are just two folders.
+
+Configuration variables (overrides; rarely needed):           *fschat-config*
+
+    g:fschat_port        Explicit daemon port.
+    g:fschat_port_file   Explicit path to a daemon port file.
+
+Resolution order: g:fschat_port, then g:fschat_port_file, then a .fschat-port
+marker found by walking up from the open file, then ~/.config/fschat/port.
+
+==============================================================================
+USAGE                                                        *fschat-usage*
+
+The compose pane (bottom) is where you type. Press <CR> to send. Incoming
+messages appear in the transcript pane (top) without disturbing your typing.
+
+Commands (run with the cursor on a message in the transcript pane):
+
+    :FschatEdit      Edit the message under the cursor (your own only). Its
+                     text is loaded into the compose pane; <CR> sends the edit.
+    :FschatDelete    Delete the message under the cursor (your own only).
+    :FschatReload    Re-fetch the whole transcript from the daemon.
+
+You can only modify your own messages; the server rejects anything else.
+
+==============================================================================
+ vim:tw=78:ts=8:ft=help:norl:

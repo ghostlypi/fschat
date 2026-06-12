@@ -1,0 +1,67 @@
+package dev.fschat.server;
+
+import dev.fschat.server.auth.AuthService;
+import dev.fschat.server.auth.Tokens;
+import dev.fschat.server.channel.ChannelService;
+import dev.fschat.server.log.EventLog;
+import dev.fschat.server.net.AuthHttpServer;
+import dev.fschat.server.net.FschatWsServer;
+import dev.fschat.server.store.BlockStore;
+import dev.fschat.server.store.ChannelStore;
+import dev.fschat.server.store.Db;
+import dev.fschat.server.store.UserStore;
+
+import javax.net.ssl.SSLContext;
+import java.net.InetSocketAddress;
+import java.nio.file.Path;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * Wires the persistence, auth, channel and network layers into a runnable
+ * server. Serves account bootstrap over HTTPS and the live stream over WSS,
+ * sharing one {@link SSLContext} (null = plain HTTP/WS for local dev/tests).
+ */
+public final class FschatServer implements AutoCloseable {
+
+    private final Db db;
+    private final AuthHttpServer authServer;
+    private final FschatWsServer wsServer;
+
+    public FschatServer(Path dbFile, String host, int httpsPort, int wsPort,
+                        SSLContext sslContext, String jwtSecret, long tokenTtlSeconds) {
+        this.db = new Db(dbFile);
+        UserStore users = new UserStore(db);
+        ChannelStore channels = new ChannelStore(db);
+        EventLog log = new EventLog(db);
+        AuthService auth = new AuthService(users, new Tokens(jwtSecret, tokenTtlSeconds));
+        ChannelService channelService = new ChannelService(users, channels, log, new BlockStore(db));
+
+        this.authServer = new AuthHttpServer(new InetSocketAddress(host, httpsPort), sslContext, auth);
+        this.wsServer = new FschatWsServer(new InetSocketAddress(host, wsPort), sslContext, auth, channelService);
+    }
+
+    public void start() throws InterruptedException {
+        authServer.start();
+        wsServer.start();
+        wsServer.awaitStart(10, TimeUnit.SECONDS);
+    }
+
+    public int httpsPort() {
+        return authServer.port();
+    }
+
+    public int wsPort() {
+        return wsServer.getPort();
+    }
+
+    @Override
+    public void close() {
+        try {
+            wsServer.stop(1000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        authServer.stop();
+        db.close();
+    }
+}
