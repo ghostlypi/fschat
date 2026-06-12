@@ -51,3 +51,12 @@ CREATE TABLE IF NOT EXISTS blocks (
   created_ts TEXT NOT NULL,
   PRIMARY KEY (user_id, blocked_id)
 );
+
+-- Single-use registration invite codes (128 random bytes, base64url). A code is
+-- claimed atomically at register time (used_ts set); used_by records the consumer.
+CREATE TABLE IF NOT EXISTS invites (
+  code       TEXT PRIMARY KEY,
+  created_ts TEXT NOT NULL,
+  used_ts    TEXT,
+  used_by    TEXT
+);

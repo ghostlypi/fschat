@@ -75,21 +75,54 @@ if [ ! -s "$SECRET_FILE" ]; then
 fi
 SECRET="$(cat "$SECRET_FILE")"
 
+# 2b. Admin token (generated once). Its presence makes registration INVITE-ONLY and
+# enables POST /admin/invite to mint codes. Generate invites with scripts/new-invite.sh.
+ADMIN_FILE="$DEPLOY_DIR/admin-token"
+if [ ! -s "$ADMIN_FILE" ]; then
+  head -c 32 /dev/urandom | base64 | tr -d '\n' > "$ADMIN_FILE"
+  chmod 600 "$ADMIN_FILE"
+  say "Generated an admin token at $ADMIN_FILE (registration is now invite-only)"
+fi
+ADMIN="$(cat "$ADMIN_FILE")"
+
+# 2c. Public domain (remembered): added to the self-signed cert SAN so TLS verifies
+# for it until a Let's Encrypt cert takes over.
+DOMAIN_FILE="$DEPLOY_DIR/domain"
+if [ -n "${FSCHAT_PUBLIC_DOMAIN:-}" ]; then
+  DOMAIN="$FSCHAT_PUBLIC_DOMAIN"
+  printf '%s' "$DOMAIN" > "$DOMAIN_FILE"
+elif [ -s "$DOMAIN_FILE" ]; then
+  DOMAIN="$(cat "$DOMAIN_FILE")"
+else
+  DOMAIN=""
+fi
+
 HOST_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 [ -n "$HOST_IP" ] || HOST_IP="127.0.0.1"
 
-# 3. TLS (self-signed cert covering localhost + this host's LAN IP)
+# 3. TLS. Prefer a Let's Encrypt keystore (le-keystore.p12) if one has been installed
+#    by the renewal hook; otherwise generate a self-signed cert covering localhost,
+#    the LAN IP, and the public domain. Either way the server reads /certs/<file>.
 SERVER_ARGS=(--host 0.0.0.0 --db /data/fschat.db --https-port 8443 --ws-port 8444)
 MOUNTS=()
 SCHEME="http"
 CURL_TLS=()
 if [ "$TLS" -eq 1 ]; then
   CERT_DIR="$DEPLOY_DIR/certs"
-  say "Generating self-signed TLS cert for localhost + $HOST_IP ..."
-  "$REPO_ROOT/scripts/gen-dev-certs.sh" "$CERT_DIR" "$KEYSTORE_PASS" "ip:$HOST_IP" >/dev/null
+  mkdir -p "$CERT_DIR"
+  if [ -s "$CERT_DIR/le-keystore.p12" ]; then
+    KS_FILE="le-keystore.p12"
+    say "Using Let's Encrypt keystore $CERT_DIR/le-keystore.p12"
+  else
+    KS_FILE="dev-keystore.p12"
+    EXTRA_SANS="ip:$HOST_IP"
+    [ -n "$DOMAIN" ] && EXTRA_SANS="$EXTRA_SANS,dns:$DOMAIN"
+    say "Generating self-signed TLS cert (SAN: localhost,127.0.0.1,$EXTRA_SANS) ..."
+    "$REPO_ROOT/scripts/gen-dev-certs.sh" "$CERT_DIR" "$KEYSTORE_PASS" "$EXTRA_SANS" >/dev/null
+  fi
   # ':Z' relabels the dir for SELinux (Fedora enforcing) so the container can read it.
   MOUNTS=(-v "$CERT_DIR:/certs:ro,Z")
-  SERVER_ARGS+=(--keystore /certs/dev-keystore.p12 --keystore-pass "$KEYSTORE_PASS")
+  SERVER_ARGS+=(--keystore "/certs/$KS_FILE" --keystore-pass "$KEYSTORE_PASS")
   SCHEME="https"
   CURL_TLS=(-k)
 fi
@@ -105,6 +138,7 @@ $RT run -d --name "$NAME" \
   --restart unless-stopped \
   -p "${HTTPS_PORT}:8443" -p "${WS_PORT}:8444" \
   -e FSCHAT_JWT_SECRET="$SECRET" \
+  -e FSCHAT_ADMIN_TOKEN="$ADMIN" \
   -v "${VOLUME}:/data" \
   "${MOUNTS[@]}" \
   "$IMAGE" "${SERVER_ARGS[@]}" >/dev/null
@@ -127,15 +161,21 @@ say ""
 say "Deployed. $($RT ps --filter "name=$NAME" --format '{{.Names}} -> {{.Status}}')"
 say ""
 if [ "$TLS" -eq 1 ]; then
-  say "TLS is on. Give each tester the truststore (password: $KEYSTORE_PASS):"
-  say "    $DEPLOY_DIR/certs/dev-truststore.p12"
-  say "They set these once (e.g. in ~/.bashrc), pointing at their copy of that file:"
-  say "  export FSCHAT_HOST=$HOST_IP FSCHAT_AUTH_PORT=$HTTPS_PORT FSCHAT_WS_PORT=$WS_PORT FSCHAT_TLS=true"
-  say "  export FSCHAT_TRUSTSTORE=<path>/dev-truststore.p12 FSCHAT_TRUSTSTORE_PASS=$KEYSTORE_PASS"
-  say "and then register once (the daemon installs itself as an always-on service):"
-  say "  fschat-daemon register <name>"
-  say "  fschat-daemon create <peer>   # then edit the .chat file it prints in vim"
-  say "  (connect via $HOST_IP — NOT 'localhost', which may resolve to IPv6 and fail)"
+  say "Registration is INVITE-ONLY. Mint a code for each tester:"
+  say "    scripts/new-invite.sh"
+  say ""
+  if [ "$KS_FILE" = "le-keystore.p12" ]; then
+    say "Public Let's Encrypt cert in use — testers need only the daemon + an invite"
+    say "(host ${DOMAIN:-the public domain}, ports, and TLS are baked into the client):"
+    say "  fschat-daemon register <name> --invite <code>"
+    say "  fschat-daemon create <peer>   # then edit the .chat file it prints in vim"
+  else
+    say "Self-signed cert: also give each tester the truststore (password: $KEYSTORE_PASS):"
+    say "    $DEPLOY_DIR/certs/dev-truststore.p12"
+    say "  export FSCHAT_TRUSTSTORE=<path>/dev-truststore.p12 FSCHAT_TRUSTSTORE_PASS=$KEYSTORE_PASS"
+    say "  fschat-daemon register <name> --invite <code>   # host/ports/TLS baked in"
+    say "  (off-LAN testers reach ${DOMAIN:-your domain}; on-LAN use $HOST_IP)"
+  fi
 else
   say "Beta testers connect their daemon to this host:"
   say "  fschat-daemon register <name> --host $HOST_IP --auth-port $HTTPS_PORT"

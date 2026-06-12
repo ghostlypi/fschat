@@ -47,20 +47,20 @@ public final class Main implements Runnable {
 
     /** Connection options to the server. */
     static final class ServerOpts {
-        // Every option falls back to an env var, so testers `export` connection settings
-        // once (e.g. in ~/.bashrc) instead of repeating the flags on every command.
-        // Default --host is 127.0.0.1, not "localhost": localhost can resolve to ::1 (IPv6)
-        // and rootless-podman publishes only IPv4, so localhost would fail to connect.
-        @Option(names = "--host", defaultValue = "${env:FSCHAT_HOST:-127.0.0.1}",
+        // The public service is baked in as the default so testers just `register`.
+        // Each option still falls back to an env var (set FSCHAT_HOST=127.0.0.1 etc. for
+        // local dev against your own server). TLS is ON by default; FSCHAT_TLS=false
+        // forces plaintext for local dev.
+        @Option(names = "--host", defaultValue = "${env:FSCHAT_HOST:-fschat.ghostlypi.com}",
                 description = "Server host (env: FSCHAT_HOST; default: ${DEFAULT-VALUE}).")
         String host;
-        @Option(names = "--auth-port", defaultValue = "${env:FSCHAT_AUTH_PORT:-8443}",
+        @Option(names = "--auth-port", defaultValue = "${env:FSCHAT_AUTH_PORT:-7443}",
                 description = "HTTPS auth port (env: FSCHAT_AUTH_PORT; default: ${DEFAULT-VALUE}).")
         int authPort;
-        @Option(names = "--ws-port", defaultValue = "${env:FSCHAT_WS_PORT:-8444}",
+        @Option(names = "--ws-port", defaultValue = "${env:FSCHAT_WS_PORT:-7444}",
                 description = "WSS stream port (env: FSCHAT_WS_PORT; default: ${DEFAULT-VALUE}).")
         int wsPort;
-        @Option(names = "--tls", description = "Use https/wss (env: FSCHAT_TLS=true; default: plaintext).")
+        @Option(names = "--tls", description = "Force https/wss (on by default; FSCHAT_TLS=false for plaintext).")
         boolean tlsFlag;
         @Option(names = "--truststore", description = "PKCS12 truststore for the server cert (env: FSCHAT_TRUSTSTORE).")
         Path truststoreOpt;
@@ -72,8 +72,12 @@ public final class Main implements Runnable {
             if (tlsFlag) {
                 return true;
             }
+            // Default ON for the public TLS service; FSCHAT_TLS=false (or 0/no) opts out.
             String v = System.getenv("FSCHAT_TLS");
-            return v != null && (v.equalsIgnoreCase("true") || v.equals("1") || v.equalsIgnoreCase("yes"));
+            if (v == null || v.isBlank()) {
+                return true;
+            }
+            return !(v.equalsIgnoreCase("false") || v.equals("0") || v.equalsIgnoreCase("no"));
         }
 
         private Path truststore() {
@@ -144,15 +148,23 @@ public final class Main implements Runnable {
         @Mixin PathOpts paths;
         @Parameters(index = "0", description = "Username.") String username;
         @Option(names = "--password", description = "Password (prompted if omitted).") String password;
+        @Option(names = {"-i", "--invite"}, description = "Invite code (required; or set FSCHAT_INVITE).")
+        String invite;
         @Option(names = "--no-service", description = "Don't install the always-on systemd user service.")
         boolean noService;
 
         @Override
         public Integer call() {
+            String code = (invite != null && !invite.isBlank()) ? invite : System.getenv("FSCHAT_INVITE");
+            if (code == null || code.isBlank()) {
+                System.err.println("error: registration requires an invite code "
+                        + "(pass --invite <code> or set FSCHAT_INVITE)");
+                return 1;
+            }
             String pw = password != null ? password : prompt("password for " + username + ": ");
             AuthClient.AuthInfo info;
             try {
-                info = new AuthClient(server.authBase(), server.ssl()).register(username, pw);
+                info = new AuthClient(server.authBase(), server.ssl()).register(username, pw, code);
             } catch (AuthClient.AuthFailed e) {
                 System.err.println("error: " + e.getMessage());
                 return 1;

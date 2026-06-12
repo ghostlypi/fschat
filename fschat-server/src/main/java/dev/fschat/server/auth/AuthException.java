@@ -6,6 +6,7 @@ public final class AuthException extends RuntimeException {
     public static final String INVALID_CREDENTIALS = "INVALID_CREDENTIALS";
     public static final String INVALID_TOKEN = "INVALID_TOKEN";
     public static final String BAD_REQUEST = "BAD_REQUEST";
+    public static final String FORBIDDEN = "FORBIDDEN";
 
     private final String code;
 

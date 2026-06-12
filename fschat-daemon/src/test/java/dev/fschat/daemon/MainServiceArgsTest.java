@@ -13,16 +13,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class MainServiceArgsTest {
 
     @Test
-    void plaintextStartArgsOmitTls() {
+    void startArgsAlwaysIncludeHostAndPorts() {
         Main.ServerOpts s = new Main.ServerOpts();
-        s.host = "127.0.0.1";
-        s.authPort = 8443;
-        s.wsPort = 8444;
-        s.tlsFlag = false;
+        s.host = "fschat.ghostlypi.com";
+        s.authPort = 7443;
+        s.wsPort = 7444;
 
         List<String> args = s.startArgs();
-        assertEquals(List.of("--host", "127.0.0.1", "--auth-port", "8443", "--ws-port", "8444"), args);
-        assertFalse(args.contains("--tls"));
+        assertEquals("--host", args.get(0));
+        assertEquals("fschat.ghostlypi.com", args.get(1));
+        assertTrue(args.contains("--auth-port") && args.contains("7443"));
+        assertTrue(args.contains("--ws-port") && args.contains("7444"));
     }
 
     @Test

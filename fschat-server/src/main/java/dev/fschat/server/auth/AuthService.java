@@ -1,5 +1,6 @@
 package dev.fschat.server.auth;
 
+import dev.fschat.server.store.InviteStore;
 import dev.fschat.server.store.UserStore;
 
 import java.util.List;
@@ -26,14 +27,34 @@ public final class AuthService {
 
     private final UserStore users;
     private final Tokens tokens;
+    private final InviteStore invites;
 
+    /** Open registration (no invite required). Used by tests and local plaintext dev. */
     public AuthService(UserStore users, Tokens tokens) {
-        this.users = users;
-        this.tokens = tokens;
+        this(users, tokens, null);
     }
 
-    /** Create a new account (duplicate usernames allowed) and return a token + its handle. */
+    /**
+     * If {@code invites} is non-null, registration requires a valid single-use
+     * invite code; if null, registration is open.
+     */
+    public AuthService(UserStore users, Tokens tokens, InviteStore invites) {
+        this.users = users;
+        this.tokens = tokens;
+        this.invites = invites;
+    }
+
+    /** Open-registration register (no invite). Equivalent to {@code register(u, p, null)}. */
     public AuthResult register(String username, String password) {
+        return register(username, password, null);
+    }
+
+    /**
+     * Create a new account (duplicate usernames allowed) and return a token + its
+     * handle. When an {@link InviteStore} is configured, a valid unused
+     * {@code invite} code is required and is claimed (single-use) on success.
+     */
+    public AuthResult register(String username, String password, String invite) {
         if (username == null || !USERNAME.matcher(username).matches()) {
             throw new AuthException(AuthException.BAD_REQUEST,
                     "username must be 2-32 chars of [a-z0-9_]");
@@ -42,7 +63,18 @@ public final class AuthService {
             throw new AuthException(AuthException.BAD_REQUEST,
                     "password must be at least " + MIN_PASSWORD + " characters");
         }
+        if (invites != null) {
+            if (invite == null || invite.isBlank()) {
+                throw new AuthException(AuthException.FORBIDDEN, "an invite code is required to register");
+            }
+            if (!invites.claim(invite)) {
+                throw new AuthException(AuthException.FORBIDDEN, "invalid or already-used invite code");
+            }
+        }
         UserStore.UserRow row = users.create(username, Passwords.hash(password));
+        if (invites != null) {
+            invites.recordUser(invite, row.id());
+        }
         return result(row);
     }
 

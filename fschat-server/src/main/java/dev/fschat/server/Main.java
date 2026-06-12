@@ -49,6 +49,11 @@ public final class Main implements Callable<Integer> {
     @Option(names = "--token-ttl-seconds", description = "Token lifetime (default: ${DEFAULT-VALUE}).")
     private long tokenTtl = 86_400;
 
+    @Option(names = "--admin-token",
+            description = "Bearer token for POST /admin/invite. When set, registration becomes "
+                    + "invite-gated. Defaults to $FSCHAT_ADMIN_TOKEN.")
+    private String adminToken;
+
     @Override
     public Integer call() throws Exception {
         SSLContext ssl = null;
@@ -59,12 +64,15 @@ public final class Main implements Callable<Integer> {
         }
 
         String secret = resolveSecret();
+        String admin = (adminToken != null && !adminToken.isBlank())
+                ? adminToken : System.getenv("FSCHAT_ADMIN_TOKEN");
 
-        try (FschatServer server = new FschatServer(db, host, httpsPort, wsPort, ssl, secret, tokenTtl)) {
+        try (FschatServer server = new FschatServer(db, host, httpsPort, wsPort, ssl, secret, tokenTtl, admin)) {
             server.start();
             String scheme = ssl != null ? "https/wss" : "http/ws";
-            System.out.printf("fschat-server up (%s) auth=:%d stream=:%d db=%s%n",
-                    scheme, server.httpsPort(), server.wsPort(), db);
+            boolean gated = admin != null && !admin.isBlank();
+            System.out.printf("fschat-server up (%s) auth=:%d stream=:%d db=%s registration=%s%n",
+                    scheme, server.httpsPort(), server.wsPort(), db, gated ? "invite-only" : "open");
 
             CountDownLatch shutdown = new CountDownLatch(1);
             Runtime.getRuntime().addShutdownHook(new Thread(shutdown::countDown));

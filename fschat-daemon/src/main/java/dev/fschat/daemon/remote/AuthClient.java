@@ -37,16 +37,22 @@ public final class AuthClient {
         this.http = b.build();
     }
 
-    public AuthInfo register(String username, String password) {
-        return post("/register", username, password);
+    public AuthInfo register(String username, String password, String invite) {
+        return post("/register", username, password, invite);
     }
 
     public AuthInfo login(String identifier, String password) {
-        return post("/login", identifier, password);
+        return post("/login", identifier, password, null);
     }
 
-    private AuthInfo post(String path, String username, String password) {
-        String body = Json.write(Map.of("username", username, "password", password));
+    private AuthInfo post(String path, String username, String password, String invite) {
+        java.util.Map<String, String> fields = new java.util.LinkedHashMap<>();
+        fields.put("username", username);
+        fields.put("password", password);
+        if (invite != null && !invite.isBlank()) {
+            fields.put("invite", invite);
+        }
+        String body = Json.write(fields);
         HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + path))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
