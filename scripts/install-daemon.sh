@@ -19,7 +19,7 @@ set -euo pipefail
 REPO="${FSCHAT_REPO:-ghostlypi/fschat}"
 PREFIX="${FSCHAT_PREFIX:-$HOME/.fschat}"
 BIN_DIR="${FSCHAT_BIN:-$HOME/.local/bin}"
-TAR_SRC="${FSCHAT_DAEMON_TAR:-https://github.com/$REPO/releases/latest/download/fschat-daemon.tar}"
+TAR_SRC="${FSCHAT_DAEMON_TAR:-https://github.com/$REPO/releases/download/v0.0.1/fschat-daemon.tar}"
 VIMRC="${VIMRC:-$HOME/.vimrc}"
 
 say() { printf '%s\n' "$*"; }

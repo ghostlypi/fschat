@@ -95,7 +95,13 @@ public final class Main implements Runnable {
         @Override
         public Integer call() {
             String pw = password != null ? password : prompt("password for " + username + ": ");
-            AuthClient.AuthInfo info = new AuthClient(server.authBase(), server.ssl()).register(username, pw);
+            AuthClient.AuthInfo info;
+            try {
+                info = new AuthClient(server.authBase(), server.ssl()).register(username, pw);
+            } catch (AuthClient.AuthFailed e) {
+                System.err.println("error: " + e.getMessage());
+                return 1;
+            }
             paths.config().writeToken(info.token());
             System.out.println("registered as " + info.handle() + "; token saved to " + paths.config().tokenFile());
             System.out.println("others can reach you with:  " + info.handle());
@@ -113,7 +119,13 @@ public final class Main implements Runnable {
         @Override
         public Integer call() {
             String pw = password != null ? password : prompt("password for " + username + ": ");
-            AuthClient.AuthInfo info = new AuthClient(server.authBase(), server.ssl()).login(username, pw);
+            AuthClient.AuthInfo info;
+            try {
+                info = new AuthClient(server.authBase(), server.ssl()).login(username, pw);
+            } catch (AuthClient.AuthFailed e) {
+                System.err.println("error: " + e.getMessage());
+                return 1;
+            }
             paths.config().writeToken(info.token());
             System.out.println("logged in as " + info.handle());
             return 0;

@@ -63,7 +63,23 @@ public final class AuthClient {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            throw new AuthFailed("could not reach server at " + baseUrl + ": " + e.getMessage());
+            throw new AuthFailed("could not reach server at " + baseUrl + ": " + e.getMessage() + tlsHint(e));
         }
+    }
+
+    /** Detect the common scheme mismatch and suggest the fix. */
+    private String tlsHint(Exception e) {
+        String m = String.valueOf(e.getMessage());
+        boolean plaintextToTls = m.contains("received no bytes") || m.contains("EOF reached");
+        boolean tlsToPlaintext = m.contains("Unsupported or unrecognized SSL message")
+                || m.contains("plaintext connection?");
+        if (baseUrl.startsWith("http://") && plaintextToTls) {
+            return "\n  hint: this server appears to require TLS — re-run with"
+                    + " --tls --truststore <file> --truststore-pass <pw>";
+        }
+        if (baseUrl.startsWith("https://") && tlsToPlaintext) {
+            return "\n  hint: this server is plaintext — drop --tls (and --truststore)";
+        }
+        return "";
     }
 }
