@@ -28,3 +28,13 @@ endif
 if !exists('g:fschat_bufs')
   let g:fschat_bufs = {}
 endif
+
+" Attach on opening a .chat file. We trigger from here (not only ftplugin/chat.vim)
+" so the dual-pane setup works even without `filetype plugin on` in the user's vimrc
+" — a minimal vimrc does not source ftplugin/. Scoped to *.chat so the plugin only
+" ever touches fschat files. fschat#attach() guards on b:fschat_attached, so this is
+" idempotent and coexists with the ftplugin path when filetype plugin IS enabled.
+augroup fschat_open
+  autocmd!
+  autocmd BufRead,BufNewFile *.chat call fschat#attach()
+augroup END
