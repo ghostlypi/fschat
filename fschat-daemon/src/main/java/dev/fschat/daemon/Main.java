@@ -45,32 +45,55 @@ public final class Main implements Runnable {
 
     /** Connection options to the server. */
     static final class ServerOpts {
-        // Default to 127.0.0.1, not "localhost": localhost can resolve to ::1 (IPv6),
+        // Every option falls back to an env var, so testers `export` connection settings
+        // once (e.g. in ~/.bashrc) instead of repeating the flags on every command.
+        // Default --host is 127.0.0.1, not "localhost": localhost can resolve to ::1 (IPv6)
         // and rootless-podman publishes only IPv4, so localhost would fail to connect.
-        @Option(names = "--host", description = "Server host (default: ${DEFAULT-VALUE}).")
-        String host = "127.0.0.1";
-        @Option(names = "--auth-port", description = "HTTPS auth port (default: ${DEFAULT-VALUE}).")
-        int authPort = 8443;
-        @Option(names = "--ws-port", description = "WSS stream port (default: ${DEFAULT-VALUE}).")
-        int wsPort = 8444;
-        @Option(names = "--tls", description = "Use https/wss (default: plaintext dev).")
-        boolean tls = false;
-        @Option(names = "--truststore", description = "PKCS12 truststore for the server cert.")
-        Path truststore;
-        @Option(names = "--truststore-pass", description = "Truststore password.")
-        String truststorePass = "";
+        @Option(names = "--host", defaultValue = "${env:FSCHAT_HOST:-127.0.0.1}",
+                description = "Server host (env: FSCHAT_HOST; default: ${DEFAULT-VALUE}).")
+        String host;
+        @Option(names = "--auth-port", defaultValue = "${env:FSCHAT_AUTH_PORT:-8443}",
+                description = "HTTPS auth port (env: FSCHAT_AUTH_PORT; default: ${DEFAULT-VALUE}).")
+        int authPort;
+        @Option(names = "--ws-port", defaultValue = "${env:FSCHAT_WS_PORT:-8444}",
+                description = "WSS stream port (env: FSCHAT_WS_PORT; default: ${DEFAULT-VALUE}).")
+        int wsPort;
+        @Option(names = "--tls", description = "Use https/wss (env: FSCHAT_TLS=true; default: plaintext).")
+        boolean tlsFlag;
+        @Option(names = "--truststore", description = "PKCS12 truststore for the server cert (env: FSCHAT_TRUSTSTORE).")
+        Path truststoreOpt;
+        @Option(names = "--truststore-pass", defaultValue = "${env:FSCHAT_TRUSTSTORE_PASS:-}",
+                description = "Truststore password (env: FSCHAT_TRUSTSTORE_PASS).")
+        String truststorePass;
+
+        private boolean tls() {
+            if (tlsFlag) {
+                return true;
+            }
+            String v = System.getenv("FSCHAT_TLS");
+            return v != null && (v.equalsIgnoreCase("true") || v.equals("1") || v.equalsIgnoreCase("yes"));
+        }
+
+        private Path truststore() {
+            if (truststoreOpt != null) {
+                return truststoreOpt;
+            }
+            String v = System.getenv("FSCHAT_TRUSTSTORE");
+            return (v != null && !v.isBlank()) ? Path.of(v) : null;
+        }
 
         String authBase() {
-            return (tls ? "https" : "http") + "://" + host + ":" + authPort;
+            return (tls() ? "https" : "http") + "://" + host + ":" + authPort;
         }
 
         URI wsUri() {
-            return URI.create((tls ? "wss" : "ws") + "://" + host + ":" + wsPort);
+            return URI.create((tls() ? "wss" : "ws") + "://" + host + ":" + wsPort);
         }
 
         SSLContext ssl() {
-            return (tls && truststore != null)
-                    ? ClientTls.trusting(truststore, truststorePass.toCharArray())
+            Path ts = truststore();
+            return (tls() && ts != null)
+                    ? ClientTls.trusting(ts, truststorePass.toCharArray())
                     : null;
         }
     }

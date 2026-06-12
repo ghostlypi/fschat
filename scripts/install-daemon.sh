@@ -85,7 +85,10 @@ if [ -d "$PLUGIN_DIR" ]; then
 fi
 
 say ""
-say "Done. Get started:"
-say "  fschat-daemon register <username> --host <server-host>"
-say "  fschat-daemon start --host <server-host> &"
+say "Done. If your server uses TLS, set these once (your admin gives you the truststore):"
+say "  export FSCHAT_HOST=<server-ip> FSCHAT_TLS=true"
+say "  export FSCHAT_TRUSTSTORE=<path>/dev-truststore.p12 FSCHAT_TRUSTSTORE_PASS=<pw>"
+say "Then get started (no per-command flags needed):"
+say "  fschat-daemon register <username>"
+say "  fschat-daemon start &"
 say "  fschat-daemon create <user>        # then open the .chat file it prints with vim"
