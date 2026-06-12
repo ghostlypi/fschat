@@ -378,7 +378,8 @@ public final class Main implements Runnable {
             return;
         }
         if (!ServiceInstaller.available()) {
-            System.out.println("note: no systemd --user here; start the daemon with:  fschat-daemon start &");
+            System.out.println("note: no service manager (systemd/launchd) here; "
+                    + "start the daemon with:  fschat-daemon start &");
             return;
         }
         // A non-default --config-dir gets its own unit, so multiple accounts can each

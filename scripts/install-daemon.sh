@@ -19,14 +19,19 @@ set -euo pipefail
 REPO="${FSCHAT_REPO:-ghostlypi/fschat}"
 PREFIX="${FSCHAT_PREFIX:-$HOME/.fschat}"
 BIN_DIR="${FSCHAT_BIN:-$HOME/.local/bin}"
-TAR_SRC="${FSCHAT_DAEMON_TAR:-https://github.com/$REPO/releases/download/v0.0.1/fschat-daemon.tar}"
+TAR_SRC="${FSCHAT_DAEMON_TAR:-https://github.com/$REPO/releases/latest/download/fschat-daemon.tar}"
 VIMRC="${VIMRC:-$HOME/.vimrc}"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 # --- prerequisites ---------------------------------------------------------
-command -v java >/dev/null 2>&1 || die "Java 21+ is required, but 'java' was not found on PATH."
+if ! command -v java >/dev/null 2>&1; then
+  case "$(uname -s)" in
+    Darwin) die "Java 21+ is required. Install it with:  brew install --cask temurin   (or grab the .pkg from adoptium.net)" ;;
+    *)      die "Java 21+ is required, but 'java' was not found on PATH. Install a JDK 21+ (e.g. Temurin from adoptium.net)." ;;
+  esac
+fi
 say "Using $(java -version 2>&1 | head -1)"
 command -v tar >/dev/null 2>&1 || die "'tar' is required."
 

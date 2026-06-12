@@ -26,6 +26,20 @@ class ServiceInstallerTest {
     }
 
     @Test
+    void plistHasProgramArgsAndKeepAlive() {
+        String plist = ServiceInstaller.plistContent("com.fschat.daemon", List.of(
+                "/home/pi/.fschat/fschat-daemon/bin/fschat-daemon", "start",
+                "--host", "fschat.ghostlypi.com", "--tls"));
+
+        assertTrue(plist.contains("<key>Label</key><string>com.fschat.daemon</string>"), plist);
+        assertTrue(plist.contains("<key>RunAtLoad</key><true/>"), plist);
+        assertTrue(plist.contains("<key>KeepAlive</key><true/>"), plist);
+        // each command token is its own <string> in ProgramArguments
+        assertTrue(plist.contains("<string>start</string>"), plist);
+        assertTrue(plist.contains("<string>fschat.ghostlypi.com</string>"), plist);
+    }
+
+    @Test
     void launcherResolvesToSomething() {
         // In a test JVM the code source isn't the installed layout, so this falls back to
         // PATH or the bare name — but it must never be null.

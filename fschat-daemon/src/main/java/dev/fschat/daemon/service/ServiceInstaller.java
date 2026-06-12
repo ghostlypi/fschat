@@ -7,77 +7,114 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 
 /**
- * Installs a systemd <em>user</em> service so the daemon runs without anyone typing
- * {@code start}: it auto-starts on login/boot (with linger), restarts on crash, and
- * stays connected in the background. Used by {@code register}/{@code login} so the
- * common flow is "register once, then just use it".
+ * Installs an always-on user service so the daemon runs without anyone typing
+ * {@code start}: it auto-starts at login, restarts on crash, and stays connected
+ * in the background. Used by {@code register}/{@code login} so the flow is the same
+ * on every OS — "register once, then just use it".
  *
- * <p>Everything here is best-effort and never throws into the CLI: if systemd isn't
- * available (non-Linux, no {@code systemctl}) the caller falls back to telling the
- * user to run {@code fschat-daemon start} themselves.
+ * <p>Two backends, chosen automatically: <b>systemd user units</b> on Linux and
+ * <b>launchd LaunchAgents</b> on macOS. Everything is best-effort and never throws
+ * into the CLI; if no service manager is available the caller falls back to telling
+ * the user to run {@code fschat-daemon start} themselves.
  */
 public final class ServiceInstaller {
 
+    /** Default systemd unit name (Linux, default account). */
     public static final String UNIT = "fschat.service";
+    /** Default launchd label (macOS, default account). */
+    public static final String LABEL = "com.fschat.daemon";
 
     private ServiceInstaller() {
     }
 
-    /** True if we can manage a systemd user service on this host. */
-    public static boolean available() {
-        String os = System.getProperty("os.name", "").toLowerCase();
-        return os.contains("linux") && which("systemctl") != null;
+    private static boolean isMac() {
+        return System.getProperty("os.name", "").toLowerCase().contains("mac");
     }
 
-    /** Is the named unit file already present? */
-    public static boolean installed(String unit) {
-        return Files.exists(unitPath(unit));
+    private static boolean isLinux() {
+        return System.getProperty("os.name", "").toLowerCase().contains("linux");
+    }
+
+    private static String home() {
+        return System.getProperty("user.home");
+    }
+
+    /** True if we can manage an always-on user service on this host. */
+    public static boolean available() {
+        if (isLinux()) {
+            return which("systemctl") != null;
+        }
+        if (isMac()) {
+            return which("launchctl") != null;
+        }
+        return false;
     }
 
     /**
-     * Write the named unit, reload, enable lingering, and {@code enable --now}.
-     * Returns a human-readable status line; never throws. A per-account unit name
-     * (e.g. {@code fschat-antighostlypi.service}) lets several accounts each run
-     * their own always-on daemon on one machine.
+     * The service identifier for a config-dir: a systemd unit name on Linux
+     * ({@code fschat.service} / {@code fschat-<tag>.service}) or a launchd label on
+     * macOS ({@code com.fschat.daemon} / {@code com.fschat.daemon.<tag>}). A distinct
+     * id per (non-default) config-dir lets several accounts each run their own
+     * always-on daemon on one machine.
+     */
+    public static String unitFor(Path configDir) {
+        String tag = accountTag(configDir);
+        if (isMac()) {
+            return tag.isEmpty() ? LABEL : LABEL + "." + tag;
+        }
+        return tag.isEmpty() ? UNIT : "fschat-" + tag + ".service";
+    }
+
+    /** "" for the default config-dir, else a sanitized account tag from the dir name. */
+    private static String accountTag(Path configDir) {
+        Path def = Path.of(home(), ".config", "fschat").toAbsolutePath().normalize();
+        Path cfg = configDir.toAbsolutePath().normalize();
+        if (cfg.equals(def)) {
+            return "";
+        }
+        String name = cfg.getFileName().toString();
+        String stripped = name.replaceFirst("^fschat[-_.]?", ""); // fschat-antighostlypi -> antighostlypi
+        if (stripped.isEmpty()) {
+            stripped = name;
+        }
+        return stripped.replaceAll("[^A-Za-z0-9_.-]", "-");
+    }
+
+    /** Is the named service installed? */
+    public static boolean installed(String unit) {
+        return Files.exists(isMac() ? plistPath(unit) : systemdUnitPath(unit));
+    }
+
+    /**
+     * Write the service definition and start + enable it. Returns a human-readable
+     * status line; never throws.
      *
-     * @param unit      the systemd user unit name (e.g. {@code fschat.service})
-     * @param execStart the full ExecStart command (launcher + "start" + flags)
+     * @param unit      id from {@link #unitFor} (systemd unit name or launchd label)
+     * @param execStart the full command (launcher + "start" + flags)
      */
     public static String install(String unit, List<String> execStart) {
         try {
-            Path unitFile = unitPath(unit);
-            Files.createDirectories(unitFile.getParent());
-            Files.writeString(unitFile, unitContent(execStart));
-            try {
-                Files.setPosixFilePermissions(unitFile, PosixFilePermissions.fromString("rw-------"));
-            } catch (UnsupportedOperationException | IOException ignore) {
-                // non-POSIX fs; the contents aren't very sensitive
-            }
-            run("systemctl", "--user", "daemon-reload");
-            // Linger lets the service run at boot without an interactive login. Best-effort:
-            // on locked-down hosts this needs `sudo loginctl enable-linger <user>` once.
-            run("loginctl", "enable-linger", System.getProperty("user.name"));
-            int rc = run("systemctl", "--user", "enable", "--now", unit);
-            if (rc == 0) {
-                return "daemon installed as systemd user service '" + unit + "' (auto-starts on "
-                        + "login/boot, restarts on crash). Manage: systemctl --user status|restart|stop " + unit;
-            }
-            return "wrote " + unitFile + ", but 'systemctl --user enable --now' returned " + rc
-                    + " — enable it once with:  systemctl --user enable --now " + unit;
+            return isMac() ? installLaunchd(unit, execStart) : installSystemd(unit, execStart);
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            return "could not install the systemd service (" + e.getMessage()
+            return "could not install the service (" + e.getMessage()
                     + "); run the daemon yourself with:  fschat-daemon start &";
         }
     }
 
-    /** Disable + remove the named unit. Returns a status line; never throws. */
+    /** Stop + remove the named service. Returns a status line; never throws. */
     public static String uninstall(String unit) {
         try {
+            if (isMac()) {
+                Path plist = plistPath(unit);
+                run("launchctl", "unload", "-w", plist.toString());
+                Files.deleteIfExists(plist);
+                return "removed launchd agent '" + unit + "'";
+            }
             run("systemctl", "--user", "disable", "--now", unit);
-            Files.deleteIfExists(unitPath(unit));
+            Files.deleteIfExists(systemdUnitPath(unit));
             run("systemctl", "--user", "daemon-reload");
             return "removed systemd user service '" + unit + "'";
         } catch (IOException | InterruptedException e) {
@@ -88,23 +125,32 @@ public final class ServiceInstaller {
         }
     }
 
-    /**
-     * The systemd unit name for a given config-dir. The default config-dir uses
-     * {@code fschat.service}; any other dir gets {@code fschat-<tag>.service} (tag
-     * derived from the dir name), so each account has its own always-on service.
-     */
-    public static String unitFor(Path configDir) {
-        Path def = Path.of(System.getProperty("user.home"), ".config", "fschat").toAbsolutePath().normalize();
-        Path cfg = configDir.toAbsolutePath().normalize();
-        if (cfg.equals(def)) {
-            return UNIT;
+    // --- systemd (Linux) ---------------------------------------------------
+
+    private static String installSystemd(String unit, List<String> execStart)
+            throws IOException, InterruptedException {
+        Path unitFile = systemdUnitPath(unit);
+        Files.createDirectories(unitFile.getParent());
+        Files.writeString(unitFile, unitContent(execStart));
+        try {
+            Files.setPosixFilePermissions(unitFile, PosixFilePermissions.fromString("rw-------"));
+        } catch (UnsupportedOperationException | IOException ignore) {
+            // non-POSIX fs; the contents aren't very sensitive
         }
-        String tag = cfg.getFileName().toString().replaceAll("[^A-Za-z0-9_.-]", "-");
-        // Avoid "fschat-fschat-..." when the dir is already named like fschat-<x>.
-        return (tag.startsWith("fschat") ? tag : "fschat-" + tag) + ".service";
+        run("systemctl", "--user", "daemon-reload");
+        // Linger lets the service run at boot without an interactive login. Best-effort:
+        // on locked-down hosts this needs `sudo loginctl enable-linger <user>` once.
+        run("loginctl", "enable-linger", System.getProperty("user.name"));
+        int rc = run("systemctl", "--user", "enable", "--now", unit);
+        if (rc == 0) {
+            return "daemon installed as systemd user service '" + unit + "' (auto-starts on "
+                    + "login/boot, restarts on crash). Manage: systemctl --user status|restart|stop " + unit;
+        }
+        return "wrote " + unitFile + ", but 'systemctl --user enable --now' returned " + rc
+                + " — enable it once with:  systemctl --user enable --now " + unit;
     }
 
-    /** The unit file body for the given ExecStart command. Package-visible for testing. */
+    /** The systemd unit file body for the given command. Package-visible for testing. */
     static String unitContent(List<String> execStart) {
         StringBuilder exec = new StringBuilder();
         for (String arg : execStart) {
@@ -129,6 +175,65 @@ public final class ServiceInstaller {
                 """.formatted(exec);
     }
 
+    private static Path systemdUnitPath(String unit) {
+        return Path.of(home(), ".config", "systemd", "user", unit);
+    }
+
+    // --- launchd (macOS) ---------------------------------------------------
+
+    private static String installLaunchd(String label, List<String> execStart)
+            throws IOException, InterruptedException {
+        Path plist = plistPath(label);
+        Files.createDirectories(plist.getParent());
+        Files.createDirectories(Path.of(home(), "Library", "Logs")); // for the log paths
+        Files.writeString(plist, plistContent(label, execStart));
+        // Reload cleanly: unload an old copy (ignore failure), then load + enable at login.
+        run("launchctl", "unload", plist.toString());
+        int rc = run("launchctl", "load", "-w", plist.toString());
+        if (rc == 0) {
+            return "daemon installed as launchd agent '" + label + "' (auto-starts at login, "
+                    + "restarts on crash). Manage: launchctl kickstart|stop|print gui/$(id -u)/" + label;
+        }
+        return "wrote " + plist + ", but 'launchctl load' returned " + rc
+                + " — load it once with:  launchctl load -w " + plist;
+    }
+
+    /** The launchd plist body for the given command. Package-visible for testing. */
+    static String plistContent(String label, List<String> execStart) {
+        StringBuilder args = new StringBuilder();
+        for (String arg : execStart) {
+            args.append("    <string>").append(xml(arg)).append("</string>\n");
+        }
+        String log = Path.of(home(), "Library", "Logs", label + ".log").toString();
+        return """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+                <plist version="1.0">
+                <dict>
+                  <key>Label</key><string>%s</string>
+                  <key>ProgramArguments</key>
+                  <array>
+                %s  </array>
+                  <key>RunAtLoad</key><true/>
+                  <key>KeepAlive</key><true/>
+                  <key>StandardOutPath</key><string>%s</string>
+                  <key>StandardErrorPath</key><string>%s</string>
+                </dict>
+                </plist>
+                """.formatted(xml(label), args.toString(), xml(log), xml(log));
+    }
+
+    private static Path plistPath(String label) {
+        return Path.of(home(), "Library", "LaunchAgents", label + ".plist");
+    }
+
+    private static String xml(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("\"", "&quot;").replace("'", "&apos;");
+    }
+
+    // --- shared ------------------------------------------------------------
+
     /**
      * Resolve the installed launcher script ({@code bin/fschat-daemon}) so the service
      * doesn't depend on PATH. Falls back to PATH lookup, then the bare name.
@@ -150,10 +255,6 @@ public final class ServiceInstaller {
         }
         Path onPath = which("fschat-daemon");
         return onPath != null ? onPath : Path.of("fschat-daemon");
-    }
-
-    private static Path unitPath(String unit) {
-        return Path.of(System.getProperty("user.home"), ".config", "systemd", "user", unit);
     }
 
     private static Path which(String name) {
