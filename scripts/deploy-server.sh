@@ -82,6 +82,9 @@ fi
 $RT volume inspect "$VOLUME" >/dev/null 2>&1 || $RT volume create "$VOLUME" >/dev/null
 $RT rm -f "$NAME" >/dev/null 2>&1 || true
 say "Starting '$NAME' ($SCHEME) on :$HTTPS_PORT (auth) and :$WS_PORT (stream) ..."
+# Publish on all IPv4 interfaces (loopback + LAN). NOTE: rootless podman/pasta does
+# not usefully forward IPv6, so connect via 127.0.0.1 or the LAN IP, not `localhost`
+# (which resolves to ::1 on some hosts). The daemon defaults to --host 127.0.0.1.
 $RT run -d --name "$NAME" \
   --restart unless-stopped \
   -p "${HTTPS_PORT}:8443" -p "${WS_PORT}:8444" \

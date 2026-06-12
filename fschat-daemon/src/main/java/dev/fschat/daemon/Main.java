@@ -45,8 +45,10 @@ public final class Main implements Runnable {
 
     /** Connection options to the server. */
     static final class ServerOpts {
+        // Default to 127.0.0.1, not "localhost": localhost can resolve to ::1 (IPv6),
+        // and rootless-podman publishes only IPv4, so localhost would fail to connect.
         @Option(names = "--host", description = "Server host (default: ${DEFAULT-VALUE}).")
-        String host = "localhost";
+        String host = "127.0.0.1";
         @Option(names = "--auth-port", description = "HTTPS auth port (default: ${DEFAULT-VALUE}).")
         int authPort = 8443;
         @Option(names = "--ws-port", description = "WSS stream port (default: ${DEFAULT-VALUE}).")
