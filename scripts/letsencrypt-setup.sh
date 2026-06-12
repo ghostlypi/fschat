@@ -35,8 +35,10 @@ LIVE="/etc/letsencrypt/live/$DOMAIN"
 [ -s "$CF_INI" ] || die "missing $CF_INI (Cloudflare token file — see header)"
 chmod 600 "$CF_INI" 2>/dev/null || true
 
-# 1. certbot + Cloudflare plugin
-if ! command -v certbot >/dev/null 2>&1; then
+# 1. certbot + Cloudflare plugin. Guard on the PLUGIN, not certbot: certbot may
+#    already be installed without the DNS-01 plugin (then --dns-cloudflare-* args
+#    are "unrecognized"). 'certbot plugins' lists what's actually loadable.
+if ! certbot plugins 2>/dev/null | grep -q 'dns-cloudflare'; then
   echo "Installing certbot + Cloudflare DNS plugin ..."
   dnf install -y certbot python3-certbot-dns-cloudflare
 fi
